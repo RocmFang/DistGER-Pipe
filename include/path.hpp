@@ -68,7 +68,7 @@ struct PathSet
     {
         Timer timer;
         // FILE* f = fopen(output_path, fopen_mode);
-        assert(f != NULL);
+        // assert(f != NULL);
         
         size_t null_sen = 0;
         for (int worker_idx = 0; worker_idx < seg_num; worker_idx++)
