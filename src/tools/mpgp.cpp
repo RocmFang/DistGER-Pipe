@@ -16,6 +16,7 @@
 #include<unistd.h>
 #include <unordered_map>
 #include <mutex>
+#include <fstream>
 
 #include "type.hpp"
 #include "option_helper.hpp"
@@ -717,13 +718,13 @@ void partition_relabel(const char* graph_path,const char* test_edges_path, verte
     graph_path_r += stream_mod;
     graph_path_r = str_cb(graph_path_r.c_str(), "-r");
 
-    FILE* f_graph_path_r = fopen(graph_path_r.c_str(), "w");
+    ofstream fstr_graph_path_r(graph_path_r);    
     for (edge_id_t e_i = 0; e_i < graph_e_num; e_i++)
     {
         if(e_i%2==0)
-        fprintf(f_graph_path_r,"%u %u %u\n", graph_edges[e_i].src, graph_edges[e_i].dst, graph_edges[e_i].data);
+            fstr_graph_path_r << graph_edges[e_i].src << graph_edges[e_i].dst << graph_edges[e_i].data << endl;
     }
-    fclose(f_graph_path_r);
+    fstr_graph_path_r.close();
 
     string test_path_r = str_cb(test_edges_path,pn_suffix.c_str() );
     test_path_r += stream_mod;

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.5)
 
 project(DistGER)
 
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "Debug")
 
 set(DGER_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 option(WITH_TESTS "Build unit test programs" OFF)
@@ -24,6 +24,10 @@ if(MPI_FOUND)
     include_directories(${MPI_INCLUDE_PATH})
 endif()
 
+if (NOT TARGET spdlog)
+    find_package(spdlog REQUIRED)
+endif()
+
 # if(WITH_TESTS)
 #     enable_testing()
 #     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/ext/gtest/googletest/include")
@@ -34,7 +38,7 @@ endif()
 
 #use c++11
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++0x -O3 -D USE_MKL")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -std=c++0x -O3 -D USE_MKL")
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++0x ")
 message("${CMAKE_CXX_FLAGS}")
 
