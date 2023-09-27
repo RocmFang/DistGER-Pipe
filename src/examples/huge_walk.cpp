@@ -12,7 +12,7 @@ struct Empty
 // ./bin/simple_walk -g ./karate.data -v 34 -w 34 -o ./out/walks.txt > perf_dist.txt
 int main(int argc, char **argv)
 {
-    Timer timer;
+    Timer timer,process_timer;
     MPI_Instance mpi_instance(&argc, &argv);
 
     vector<string> corpus;
@@ -29,6 +29,13 @@ int main(int argc, char **argv)
     graph.load_graph(opt.v_num, opt.graph_path.c_str(), opt.partition_path.c_str(), opt.make_undirected);
     graph.vertex_cn.resize(graph.get_vertex_num());
     // graph.load_commonNeighbors(opt.graph_common_neighbour.c_str());
+    vector<int> degrees(graph.get_vertex_num());
+    for(vertex_id_t i=0; i< graph.v_num;i++)
+    {
+       degrees[i] = graph.vertex_out_degree[i] + graph.vertex_in_degree[i]; 
+    }
+    cout<< "============= [trainer_thread launch]================"<<endl;
+    thread trainer_thread(dsgl,argc, argv,&degrees,&graph);
 
     auto extension_comp = [&](Walker<uint32_t> &walker, vertex_id_t current_v)
     {
@@ -64,20 +71,15 @@ int main(int argc, char **argv)
         {
             walk_conf.set_walk_rate(opt.rate);
         }
-        Timer timer;
+        Timer tmp_timer;
         printf("================= RANDOM WALK ================\n");
         graph.random_walk(&walker_conf, &tr_conf, &walk_conf);
-        double sum_time = timer.duration();
+        double sum_time = tmp_timer.duration();
         double walk_time = sum_time - graph.other_time;
         // printf("[p%u][sum time:]%lf [walk time:]%lf [other time:]%lf\n", graph.get_local_partition_id(), sum_time, walk_time, graph.other_time);
     }
     // MPI_Barrier(MPI_COMM_WORLD);
     printf("> [p%d RANDOM WALKING TIME:] %lf \n",get_mpi_rank(), timer.duration());
-    // if(get_mpi_rank() == 0){
-    //     FILE* stream_log = fopen("stream.log","a");
-    //     fprintf(stream_log,"%f,",timer.duration());
-    //     fclose(stream_log);
-    // }
     
 
 
@@ -88,15 +90,10 @@ int main(int argc, char **argv)
         }
     }
 
-    // FILE* fcn = fopen((to_string(get_mpi_rank())+string("cn.txt")).c_str(),"w");
-    // fprintf(fcn,"id      \tcn\n");
-    // for(int i=0;i<graph.vertex_cn.size();i++){
-    //     fprintf(fcn,"%-8d\t%-8d\n",i, graph.vertex_cn[i]);
-    // }
-    // fclose(fcn);
 
     MPI_Allreduce(MPI_IN_PLACE,graph.vertex_cn.data(), graph.get_vertex_num(), get_mpi_data_type<int>(), MPI_SUM, MPI_COMM_WORLD);
 
+    graph.isWalking = false;
     // ================= annotation line ====================
 
     graph.new_sort.resize(graph.v_num);
@@ -112,7 +109,9 @@ int main(int argc, char **argv)
 
    
     timer.restart();
-    dsgl(argc, argv,&graph.vertex_cn,&graph.new_sort,&graph);
-    printf("> [%d EMBBEDDING TIME:] %lf \n", get_mpi_rank(),timer.duration());
+    // dsgl(argc, argv,&graph.vertex_cn,&graph);
+    // printf("> [%d EMBBEDDING TIME:] %lf \n", get_mpi_rank(),timer.duration());
+    trainer_thread.join();
+    printf("> [%d PROCESS TIME:] %lf \n", get_mpi_rank(),process_timer.duration());
     return 0;
 }

@@ -5,6 +5,9 @@ project(DistGER)
 
 set(CMAKE_BUILD_TYPE "Debug")
 
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set(DGER_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 option(WITH_TESTS "Build unit test programs" OFF)
 
@@ -28,13 +31,14 @@ if (NOT TARGET spdlog)
     find_package(spdlog REQUIRED)
 endif()
 
-# if(WITH_TESTS)
-#     enable_testing()
-#     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/ext/gtest/googletest/include")
-#     add_subdirectory(ext/gtest)
-#     link_directories(${CMAKE_BINARY_DIR}/lib)
-#     set(GTEST_LIBRARIES "gtest" "gtest_main")
-# endif()
+if(WITH_TESTS)
+    message("Unit ON")
+    enable_testing()
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/ext/gtest/googletest/include")
+    add_subdirectory(ext/gtest)
+    link_directories(${CMAKE_BINARY_DIR}/lib)
+    set(GTEST_LIBRARIES "gtest" "gtest_main")
+endif()
 
 #use c++11
 

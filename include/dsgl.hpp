@@ -10,6 +10,7 @@
 #include <xmmintrin.h>
 #include "type.hpp"
 #include "util.hpp"
+#include "walk.hpp"
 #ifdef USE_MKL
 #include "mkl.h"
 #include <mutex>
@@ -361,7 +362,6 @@ void my_LearnVocabFromTrainFile()
     for (int i = 0; i < vocab_size; i++)
     {
         hash2v_vocab[v_vocab[i].id] = i;
-        hash2new_sort[(*new_sort)[i]] = i;
     }
     for (int i = 0; i < vocab_size; i++)
     {
@@ -518,8 +518,7 @@ void preparatory_work()
     word_freq_block();
 }
 
-
-void Train_SGNS_MPI()
+void Train_SGNS_MPI(vector<int> &dataset)
 {
 
 #ifdef USE_MKL
@@ -529,7 +528,7 @@ void Train_SGNS_MPI()
 #endif
 
     int num_parts = num_procs * (num_threads - 1);
-
+    rand();
     int local_num_parts = num_threads - 1;
 
     real starting_alpha = alpha;
@@ -808,7 +807,7 @@ void Train_SGNS_MPI()
 
             
 
-            ulonglong words_num = (*local_corpus).size();
+            ulonglong words_num = dataset.size();
 
             // ulonglong thread_words_num = words_num / local_num_parts + (words_num % local_num_parts > 0 ? 1 : 0);
             ulonglong thread_words_num = words_num / local_num_parts ;
@@ -909,7 +908,7 @@ void Train_SGNS_MPI()
                     while (true)
                     {
 
-                        int origin_id = (*local_corpus)[cur_words];
+                        int origin_id = dataset[cur_words];
                         word_count++;
                         cur_words++;
                         if (origin_id == -1 || cur_words >= start_words + thread_words_num)
@@ -974,7 +973,7 @@ void Train_SGNS_MPI()
                     while (true)
                     {
 
-                        int origin_id = (*local_corpus)[cur_words];
+                        int origin_id = dataset[cur_words];
                         word_count++;
                         cur_words++;
                         if (origin_id == -1 || cur_words >= start_words + thread_words_num)
@@ -1048,7 +1047,7 @@ void Train_SGNS_MPI()
                     sentence_length2 = 0;
                     continue;
                 }
-                // fprintf(flog,"p%d t%d cur word idx %zu  vid: %zu start word idx: %zu vid %zu \n",my_rank,id,cur_words,(*local_corpus)[cur_words],start_words,(*local_corpus)[start_words]);
+                // fprintf(flog,"p%d t%d cur word idx %zu  vid: %zu start word idx: %zu vid %zu \n",my_rank,id,cur_words,dataset[cur_words],start_words,dataset[start_words]);
                 // fflush(flog);
                 // ================ neg words ===================
                 if (change_neg)
@@ -1461,11 +1460,11 @@ void my_saveModel()
 }
 
 
-int dsgl(int argc, char **argv, vector<int> *vertex_cn, vector<vertex_id_t> *_new_sort, WalkEngine<real_t, uint32_t> *_graph)
+int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint32_t> *_graph)
 {
 
     cn_vocab = vertex_cn;
-    new_sort = _new_sort;
+    new_sort = nullptr;
     graph = _graph;
     local_corpus = &graph->local_corpus;
 
@@ -1560,6 +1559,7 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, vector<vertex_id_t> *_ne
         expTable[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
         expTable[i] = expTable[i] / (expTable[i] + 1);                   // Precompute f(x) = x / (x + 1)
     }
+    cout<< "flag point"<< endl;
 
     Timer pw_timer;
     preparatory_work();
@@ -1569,14 +1569,33 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, vector<vertex_id_t> *_ne
     // word_freq_block();
 
     Timer sgns_timer;
-    Train_SGNS_MPI();
-    printf("> [p%d Train SGNS MPI TIME:] %lf \n",my_rank, sgns_timer.duration());
 
+    // ! 每次阶段训练结束调用一次
+    graph->wlog->info("train ready");
+    cout<<"train ready" << endl;
+    while(graph->isWalking || !graph->data_queue.empty())
+    {
+        if(graph->data_queue.empty()){
+            usleep(1000);
+            continue;
+        }
+        graph->q_mutx.lock();
+        vector<int> round_data = graph->data_queue.front();
+        graph->data_queue.pop();
+        graph->wlog->info("Dequeue, size{0:d}",round_data.size());
+        graph->q_mutx.unlock();
+        Train_SGNS_MPI(round_data);
+    }
+
+    printf("> [p%d Train SGNS MPI TIME:] %lf \n",my_rank, sgns_timer.duration());
     
     if (my_rank == 0)
     {
         printf("[ Top Speed ] %.2f k\n",top_speed); 
+        Timer saveModel_timer;
         my_saveModel();
+        printf("> [%d Save TIME:] %lf \n", get_mpi_rank(),saveModel_timer.duration());
+
     }
     // fclose(flog);
 

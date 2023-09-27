@@ -10,6 +10,9 @@
 #include <unordered_map>
 #include <algorithm>
 #include <queue>
+#include "spdlog/async.h"
+#include "spdlog/sinks/basic_file_sink.h"
+#include <memory>
 
 using namespace std; 
 
@@ -399,6 +402,12 @@ public:
     vector<vertex_id_t> new_sort; 
     vertex_id_t minLength = 20;
     vertex_id_t init_round = 5;
+    queue<vector<int>> data_queue;
+    mutex q_mutx;
+    double idle_time = 0.0;
+    shared_ptr<spdlog::logger> wlog;
+    Timer idle_timer;
+    bool isWalking;
     
     void get_new_sort()
     {
@@ -451,6 +460,11 @@ public:
     {
         // timer = new Timer();
         randgen = new StdRandNumGenerator[this->worker_num];
+
+        string process_file_log = string("logs/") + string( "p" ) + to_string(get_mpi_rank())+"_alog.txt";
+        this->wlog = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", process_file_log,true);
+        wlog->flush_on(spdlog::level::trace);
+        this->isWalking = true;
     }
 
     ~WalkEngine()
@@ -663,6 +677,7 @@ public:
                 }
             }
             internal_walk_epoch(&walk_data, walker_config, transition_config);
+            this->idle_timer.restart();
 
             if (walk_data.collect_path_flag)
             {
@@ -675,7 +690,12 @@ public:
                     // std::string local_output_path = walk_config->output_path_prefix + "." + std::to_string(this->local_partition_id);
                     std::string local_output_path = walk_config->output_path_prefix;
                     Timer timer_dump;
-                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,this->local_corpus,this->vertex_cn,this->co_occor);
+                    vector<int> tmp_data;
+                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,tmp_data,this->vertex_cn,this->co_occor);
+                    this->q_mutx.lock();
+                    this->data_queue.push(tmp_data);
+                    this->wlog->info("Enqueue, DataSize {0:d}",tmp_data.size());
+                    this->q_mutx.unlock();
                     this->other_time += timer_dump.duration();
                     
                     MPI_Allreduce(context_map_freq.data(),  this->vertex_freq, this->v_num, get_mpi_data_type<vertex_id_t>(), MPI_SUM, MPI_COMM_WORLD);
@@ -754,6 +774,7 @@ public:
                 }
                 delete walk_data.pc;
             }
+            this->idle_time += this->idle_timer.duration();
         }
 
         this->dealloc_array(walk_data.local_walkers, walker_array_size);

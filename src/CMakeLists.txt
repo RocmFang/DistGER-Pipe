@@ -1,2 +1,5 @@
 add_subdirectory(tools)
 add_subdirectory(examples)
+IF(WITH_TESTS)
+    add_subdirectory(tests)
+ENDIF()
