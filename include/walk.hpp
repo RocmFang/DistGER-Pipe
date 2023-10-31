@@ -402,12 +402,13 @@ public:
     vector<vertex_id_t> new_sort; 
     vertex_id_t minLength = 20;
     vertex_id_t init_round = 5;
-    queue<vector<int>> data_queue;
+    queue<shared_ptr<vector<int>>> data_queue;
     mutex q_mutx;
     double idle_time = 0.0;
     shared_ptr<spdlog::logger> wlog;
     Timer idle_timer;
-    bool isWalking;
+    volatile bool isWalking;
+    mutex mpi_allR_lock;
     
     void get_new_sort()
     {
@@ -474,17 +475,6 @@ public:
         {
             delete []randgen;
         }
-        size_t glb_cross;
-        MPI_Allreduce(&this->cross_num, &glb_cross, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_intr;
-        MPI_Allreduce(&this->intr_num, &glb_intr, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_trace;
-        MPI_Allreduce(&this->trace_num, &glb_trace, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_p_step;
-        MPI_Allreduce(&this->p_step, &glb_p_step, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        // printf("[p%u]【sum_p_step】 %zu 【sum cross】 %zu 【sum intr】 %zu 【sum_trace】 %zu cross_num %zu intr_num %zu  trace_num %zu p_step_num %zu\n",this->local_partition_id, glb_p_step, glb_cross, glb_intr, glb_trace, cross_num, intr_num, trace_num, p_step);
-
-       
     }
 
     void set_concurrency(int worker_num_param)
@@ -690,11 +680,11 @@ public:
                     // std::string local_output_path = walk_config->output_path_prefix + "." + std::to_string(this->local_partition_id);
                     std::string local_output_path = walk_config->output_path_prefix;
                     Timer timer_dump;
-                    vector<int> tmp_data;
-                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,tmp_data,this->vertex_cn,this->co_occor);
+                    shared_ptr<vector<int>> data_ptr = make_shared<vector<int>>();
+                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,*data_ptr,this->vertex_cn,this->co_occor);
                     this->q_mutx.lock();
-                    this->data_queue.push(tmp_data);
-                    this->wlog->info("Enqueue, DataSize {0:d}",tmp_data.size());
+                    this->data_queue.push(data_ptr);
+                    this->wlog->info("Node {1} Enqueue Round {2}, DataSize {0:d}",data_ptr->size(),get_mpi_rank(),iter);
                     this->q_mutx.unlock();
                     this->other_time += timer_dump.duration();
                     

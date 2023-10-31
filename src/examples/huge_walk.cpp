@@ -91,7 +91,6 @@ int main(int argc, char **argv)
     }
 
 
-    MPI_Allreduce(MPI_IN_PLACE,graph.vertex_cn.data(), graph.get_vertex_num(), get_mpi_data_type<int>(), MPI_SUM, MPI_COMM_WORLD);
 
     graph.isWalking = false;
     // ================= annotation line ====================
@@ -109,7 +108,7 @@ int main(int argc, char **argv)
 
    
     timer.restart();
-    // dsgl(argc, argv,&graph.vertex_cn,&graph);
+    // dsgl(argc, argv,&degrees,&graph);
     // printf("> [%d EMBBEDDING TIME:] %lf \n", get_mpi_rank(),timer.duration());
     trainer_thread.join();
     printf("> [%d PROCESS TIME:] %lf \n", get_mpi_rank(),process_timer.duration());

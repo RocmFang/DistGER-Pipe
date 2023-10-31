@@ -29,7 +29,7 @@ FILE* flog = nullptr;
 typedef float real;
 typedef unsigned int uint;
 typedef unsigned long long ulonglong;
-
+MPI_Comm dsgl_comm;
 ulonglong local_wih_visit = 0;
 ulonglong other_wih_visit = 0;
 ulonglong local_woh_visit = 0;
@@ -522,15 +522,14 @@ void Train_SGNS_MPI(vector<int> &dataset)
 {
 
 #ifdef USE_MKL
-    if (my_rank == 0)
-        printf("=====use MKL=========\n");
     mkl_set_num_threads(1);
 #endif
 
+    train_words = dataset.size() * num_procs;
     int num_parts = num_procs * (num_threads - 1);
-    rand();
     int local_num_parts = num_threads - 1;
 
+    alpha = 0.1f;
     real starting_alpha = alpha;
     ulonglong word_count_actual = 0;
 
@@ -559,7 +558,7 @@ void Train_SGNS_MPI(vector<int> &dataset)
             {
                 usleep(1);
             }
-            MPI_Barrier(MPI_COMM_WORLD);
+            // MPI_Barrier(dsgl_comm);
  
 #pragma omp atomic
             ready_threads++;
@@ -588,8 +587,10 @@ void Train_SGNS_MPI(vector<int> &dataset)
 
                     // synchronize parameters
                     
-                    MPI_Allreduce(&active_processes, &active_processes_global, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-                    MPI_Allreduce(&word_count_actual, &word_count_actual_global, 1, MPI_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+                    // graph->mpi_allR_lock.lock();
+                    MPI_Allreduce(&active_processes, &active_processes_global, 1, MPI_INT, MPI_SUM, dsgl_comm);
+                    MPI_Allreduce(&word_count_actual, &word_count_actual_global, 1, MPI_LONG_LONG, MPI_SUM, dsgl_comm);
+                    // graph->mpi_allR_lock.unlock();
 
                     // determine if full sync   getNumZero：获取有几个0
                     
@@ -615,8 +616,8 @@ void Train_SGNS_MPI(vector<int> &dataset)
                             
 
                             // printf("win+--> syn_size: %d  sync_vac_size: %d \n", sync_size, sync_vocab_size);
-                            MPI_Allreduce(MPI_IN_PLACE, Wih + start * hidden_size, sync_size * hidden_size, MPI_SCALAR, MPI_SUM, MPI_COMM_WORLD);
-                            MPI_Allreduce(MPI_IN_PLACE, Woh + start * hidden_size, sync_size * hidden_size, MPI_SCALAR, MPI_SUM, MPI_COMM_WORLD);
+                            MPI_Allreduce(MPI_IN_PLACE, Wih + start * hidden_size, sync_size * hidden_size, MPI_SCALAR, MPI_SUM, dsgl_comm);
+                            MPI_Allreduce(MPI_IN_PLACE, Woh + start * hidden_size, sync_size * hidden_size, MPI_SCALAR, MPI_SUM, dsgl_comm);
                         }
                        
     #pragma simd
@@ -720,12 +721,12 @@ void Train_SGNS_MPI(vector<int> &dataset)
 
                          sync_block_size = sync_ind.size();
 
-                        MPI_Bcast(&sync_block_size, 1, get_mpi_data_type<int>(), 0, MPI_COMM_WORLD);
+                        MPI_Bcast(&sync_block_size, 1, get_mpi_data_type<int>(), 0, dsgl_comm);
                         if (my_rank != 0)
                         {
                             sync_ind.resize(sync_block_size);
                         }
-                        MPI_Bcast(sync_ind.data(), sync_block_size, get_mpi_data_type<int>(), 0, MPI_COMM_WORLD);
+                        MPI_Bcast(sync_ind.data(), sync_block_size, get_mpi_data_type<int>(), 0, dsgl_comm);
 
                         for (size_t i = 0; i < sync_block_size; i++)
                         {
@@ -735,8 +736,8 @@ void Train_SGNS_MPI(vector<int> &dataset)
                             memcpy(sync_block_out + i * hidden_size, Woh + (size_t)sync_ind[i] * hidden_size, hidden_size * sizeof(real));
                         }
 
-                        MPI_Allreduce(MPI_IN_PLACE, sync_block_in, sync_block_size * hidden_size, MPI_SCALAR, MPI_SUM, MPI_COMM_WORLD);
-                        MPI_Allreduce(MPI_IN_PLACE, sync_block_out, sync_block_size * hidden_size, MPI_SCALAR, MPI_SUM, MPI_COMM_WORLD);
+                        MPI_Allreduce(MPI_IN_PLACE, sync_block_in, sync_block_size * hidden_size, MPI_SCALAR, MPI_SUM, dsgl_comm);
+                        MPI_Allreduce(MPI_IN_PLACE, sync_block_out, sync_block_size * hidden_size, MPI_SCALAR, MPI_SUM, dsgl_comm);
 
     #pragma simd
     #pragma vector aligned
@@ -1462,6 +1463,8 @@ void my_saveModel()
 
 int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint32_t> *_graph)
 {
+    
+    MPI_Comm_dup(MPI_COMM_WORLD, &dsgl_comm);  
 
     cn_vocab = vertex_cn;
     new_sort = nullptr;
@@ -1471,8 +1474,8 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     char hostname[MPI_MAX_PROCESSOR_NAME];
     int hostname_len;
 
-    MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Comm_size(dsgl_comm, &num_procs);
+    MPI_Comm_rank(dsgl_comm, &my_rank);
     MPI_Get_processor_name(hostname, &hostname_len);
 
     printf("rank:%d  vertex cn %lu cn vocab %lu  local corpus size %lu \n", my_rank, vertex_cn->size(), cn_vocab->size(), local_corpus->size());
@@ -1482,7 +1485,6 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
 
     printf("processor name: %s, number of processors: %d, rank: %d\n", hostname, num_procs, my_rank);
 
-    MPI_Barrier(MPI_COMM_WORLD);
 
     output_file[0] = 0;
     save_vocab_file[0] = 0;
@@ -1580,11 +1582,11 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
             continue;
         }
         graph->q_mutx.lock();
-        vector<int> round_data = graph->data_queue.front();
+        shared_ptr<vector<int>> round_data = graph->data_queue.front();
         graph->data_queue.pop();
-        graph->wlog->info("Dequeue, size{0:d}",round_data.size());
+        graph->wlog->info("Dequeue, size{0:d}",round_data->size());
         graph->q_mutx.unlock();
-        Train_SGNS_MPI(round_data);
+        Train_SGNS_MPI(*round_data);
     }
 
     printf("> [p%d Train SGNS MPI TIME:] %lf \n",my_rank, sgns_timer.duration());
@@ -1593,10 +1595,11 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     {
         printf("[ Top Speed ] %.2f k\n",top_speed); 
         Timer saveModel_timer;
-        my_saveModel();
-        printf("> [%d Save TIME:] %lf \n", get_mpi_rank(),saveModel_timer.duration());
+        // my_saveModel();
+        printf("> [%d Save TIME:] %lf \n", my_rank,saveModel_timer.duration());
 
     }
+    MPI_Comm_free(&dsgl_comm);
     // fclose(flog);
 
     return 0;
