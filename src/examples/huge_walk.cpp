@@ -27,6 +27,10 @@ int main(int argc, char **argv)
     graph.set_minLength(opt.min_length);
     printf("init_round = %d, min_length = %d\n", graph.init_round, graph.minLength);
     graph.load_graph(opt.v_num, opt.graph_path.c_str(), opt.partition_path.c_str(), opt.make_undirected);
+    if(opt.worker_num != 0)
+        graph.set_concurrency(opt.worker_num);
+    if(get_mpi_rank() == 0)
+        printf("[walk thread num] %d \n", graph.worker_num);
     graph.vertex_cn.resize(graph.get_vertex_num());
     // graph.load_commonNeighbors(opt.graph_common_neighbour.c_str());
     vector<int> degrees(graph.get_vertex_num());
