@@ -688,6 +688,7 @@ public:
                     this->q_mutx.unlock();
                     this->other_time += timer_dump.duration();
                     
+                    paths->dumpStorage(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,*data_ptr,this->vertex_cn,this->co_occor);
                     MPI_Allreduce(context_map_freq.data(),  this->vertex_freq, this->v_num, get_mpi_data_type<vertex_id_t>(), MPI_SUM, MPI_COMM_WORLD);
                     uint64_t words_sum = 0;
                     uint64_t degree_sum = 0;

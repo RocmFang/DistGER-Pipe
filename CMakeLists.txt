@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.5)
 
 project(DistGER)
 
-set(CMAKE_BUILD_TYPE "Release")
+set(CMAKE_BUILD_TYPE "Debug")
 
 set(DGER_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 option(WITH_TESTS "Build unit test programs" OFF)

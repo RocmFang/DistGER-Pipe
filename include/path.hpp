@@ -117,6 +117,51 @@ struct PathSet
 #endif
        
     }
+    void dumpStorage(const char* output_path, const char* fopen_mode, bool with_head_info ,std::vector<vertex_id_t> &vec,std::vector<int>&local_corpus,std::vector<int>&vertex_cn,CoOccorCsr* cocsr)
+    {
+        Timer timer;
+        FILE* f = fopen(output_path, fopen_mode);
+        // assert(f != NULL);
+        
+        size_t null_sen = 0;
+        for (int worker_idx = 0; worker_idx < seg_num; worker_idx++)
+        {
+            for (walker_id_t walker_idx = 0; walker_idx < path_num[worker_idx]; walker_idx++)
+            {   
+                // std::vector<vertex_id_t>tmp_path;
+                // with_head_info = true;
+                // std::cout << "with_head_info = " << with_head_info << "\n";
+
+                if (with_head_info)
+                {
+
+                    // fprintf(f, "%u %u", walker_id[worker_idx][walker_idx], path_length[worker_idx][walker_idx]);
+                }
+                if(path_length[worker_idx][walker_idx]==0)null_sen++;
+                for (step_t p_i = 0; p_i < path_length[worker_idx][walker_idx]; p_i++)
+                {
+
+                    // vec[*(path_begin[worker_idx][walker_idx] + p_i)]++;
+                    fprintf(f, " %u", *(path_begin[worker_idx][walker_idx] + p_i));
+                    // tmp_path.push_back(*(path_begin[worker_idx][walker_idx] + p_i));
+
+                    // vertex_cn[*(path_begin[worker_idx][walker_idx] + p_i)]++;
+                    // local_corpus.push_back(*(path_begin[worker_idx][walker_idx] + p_i));
+                    assert(*(path_begin[worker_idx][walker_idx] + p_i)<=INT_MAX);
+
+                }
+                fprintf(f, "\n");
+                // local_walk_res.push_back(tmp_path);
+                // local_corpus.push_back(-1);
+            }
+        }
+        // fclose(f);
+        printf("p%d null sen: %zu\n",get_mpi_rank(),null_sen);
+#ifndef UNIT_TEST
+        printf("[p%d] finish write path data in %lf seconds \n",get_mpi_rank(), timer.duration());
+#endif
+       
+    }
 };
 
 class PathCollector
