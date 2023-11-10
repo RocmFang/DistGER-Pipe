@@ -74,6 +74,7 @@ int vocab_max_size = 1000, min_sync_words = 1024, full_sync_times = 0;
 int message_size = 1024; // MB
 ulonglong train_words = 0, file_size = 0;
 real alpha = 0.1f, sample = 1e-3f;
+real input_alpha = 0.1f;
 real model_sync_period = 0.1f;
 const real EXP_RESOLUTION = EXP_TABLE_SIZE / (MAX_EXP * 2.0f);
 
@@ -525,11 +526,10 @@ void Train_SGNS_MPI(vector<int> &dataset)
     mkl_set_num_threads(1);
 #endif
 
-    train_words = dataset.size() * num_procs;
+    train_words = dataset.size() * num_procs; // ! 这里应该用 MPI_Allreduce 加起来所有的 dataset.size()
     int num_parts = num_procs * (num_threads - 1);
     int local_num_parts = num_threads - 1;
 
-    alpha = 0.1f;
     real starting_alpha = alpha;
     ulonglong word_count_actual = 0;
 
@@ -891,9 +891,9 @@ void Train_SGNS_MPI(vector<int> &dataset)
                     last_word_count = word_count;
 
                     // update alpha
-                    alpha = starting_alpha * (1 - word_count_actual * num_procs / (real)(iter * train_words + 1));
-                    if (alpha < starting_alpha * 0.0001f)
-                        alpha = starting_alpha * 0.0001f;
+                    alpha = input_alpha * (1 - word_count_actual * num_procs / (real)(iter * train_words + 1));
+                    if (alpha < input_alpha * 0.0001f)
+                        alpha = input_alpha * 0.0001f;
                 }
 
                
@@ -1442,8 +1442,10 @@ int ArgPos(char *str, int argc, char **argv)
 
 void my_saveModel()
 {
+    printf("[save model] vocab_size: %zu\n",vocab_size);
     // save the model
-    FILE *fo = fopen(output_file, "wb");
+    if(output_file[0]==0) return; // 不保存embedding
+    FILE *fo = fopen(output_file, "w");
     // Save the word vectors
     fprintf(fo, "%ld %ld\n", vocab_size, hidden_size);
     for (int a = 0; a < vocab_size; a++)
@@ -1505,7 +1507,10 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     if ((i = ArgPos((char *)"-binary", argc, argv)) > 0)
         binary = atoi(argv[i + 1]);
     if ((i = ArgPos((char *)"-alpha", argc, argv)) > 0)
+    {
         alpha = atof(argv[i + 1]);
+        input_alpha = alpha;
+    }
     if ((i = ArgPos((char *)"-eoutput", argc, argv)) > 0)
         strcpy(output_file, argv[i + 1]);
     if ((i = ArgPos((char *)"-window", argc, argv)) > 0)
@@ -1575,6 +1580,7 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     // ! 每次阶段训练结束调用一次
     graph->wlog->info("train ready");
     cout<<"train ready" << endl;
+    int Cnt=0;
     while(graph->isWalking || !graph->data_queue.empty())
     {
         if(graph->data_queue.empty()){
@@ -1586,6 +1592,7 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
         graph->data_queue.pop();
         graph->wlog->info("Dequeue, size{0:d}",round_data->size());
         graph->q_mutx.unlock();
+        MPI_Barrier(dsgl_comm);
         Train_SGNS_MPI(*round_data);
     }
 
@@ -1595,7 +1602,7 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     {
         printf("[ Top Speed ] %.2f k\n",top_speed); 
         Timer saveModel_timer;
-        // my_saveModel();
+        my_saveModel();
         printf("> [%d Save TIME:] %lf \n", my_rank,saveModel_timer.duration());
 
     }
