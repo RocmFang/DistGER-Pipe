@@ -1,8 +1,10 @@
 #include "walk.hpp"
 #include "option_helper.hpp"
+#include <cstdio>
 #include <string>
 #include <vector>
 #include "dsgl.hpp"
+#include <numa.h>
 using namespace std;
 
 struct Empty
@@ -12,6 +14,10 @@ struct Empty
 // ./bin/simple_walk -g ./karate.data -v 34 -w 34 -o ./out/walks.txt > perf_dist.txt
 int main(int argc, char **argv)
 {
+    if(numa_available() < 0) {
+      printf("Your system does not support NUMA API\n");
+      exit(-3);
+    }
     Timer timer,process_timer;
     MPI_Instance mpi_instance(&argc, &argv);
 

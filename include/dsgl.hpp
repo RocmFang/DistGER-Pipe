@@ -1,6 +1,8 @@
+#include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 #include <unistd.h>
 #include <omp.h>
 #include <mpi.h>
@@ -11,6 +13,7 @@
 #include "type.hpp"
 #include "util.hpp"
 #include "walk.hpp"
+#include <sched.h>
 #ifdef USE_MKL
 #include "mkl.h"
 #include <mutex>
@@ -542,6 +545,15 @@ void Train_SGNS_MPI(vector<int> &dataset)
 #pragma omp parallel num_threads(num_threads)
     {
         int id = omp_get_thread_num();
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        int cpuid = id%26 + ((id/26)%2==0?26:78); 
+        graph->wlog->info("worker id: {0}  bind  cpu id : {1}",id,cpuid);
+        CPU_SET(cpuid,&set);
+        if(sched_setaffinity(0,sizeof(set),&set) == -1){
+            printf("%s:%d sched_setaffinity fail\n",__FILE__,__LINE__);
+            exit(-3);
+        }
 
         if (id == 0)
         {
@@ -1463,7 +1475,7 @@ void my_saveModel()
 }
 
 
-int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint32_t> *_graph)
+void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint32_t> *_graph)
 {
     
     MPI_Comm_dup(MPI_COMM_WORLD, &dsgl_comm);  
@@ -1580,7 +1592,6 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     // ! 每次阶段训练结束调用一次
     graph->wlog->info("train ready");
     cout<<"train ready" << endl;
-    int Cnt=0;
     while(graph->isWalking || !graph->data_queue.empty())
     {
         if(graph->data_queue.empty()){
@@ -1588,12 +1599,13 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
             continue;
         }
         graph->q_mutx.lock();
+        Timer round_train_timer;
         shared_ptr<vector<int>> round_data = graph->data_queue.front();
         graph->data_queue.pop();
-        graph->wlog->info("Dequeue, size{0:d}",round_data->size());
         graph->q_mutx.unlock();
         MPI_Barrier(dsgl_comm);
         Train_SGNS_MPI(*round_data);
+        /* graph->wlog->info("Node{1} Dequeue, size{0:d},train time: {2:f}",round_data->size(),my_rank,round_train_timer.duration()); */
     }
 
     printf("> [p%d Train SGNS MPI TIME:] %lf \n",my_rank, sgns_timer.duration());
@@ -1608,6 +1620,5 @@ int dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint3
     }
     MPI_Comm_free(&dsgl_comm);
     // fclose(flog);
-
-    return 0;
+    printf("[ %d ] dsgl is over\n",my_rank);
 }
