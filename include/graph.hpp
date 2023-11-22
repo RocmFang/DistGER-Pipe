@@ -18,6 +18,7 @@
 // #include <boost/functional/hash.hpp>
 
 #include <omp.h>
+#include <numa.h>
 
 #include "type.hpp"
 #include "util.hpp"
@@ -266,7 +267,8 @@ public:
     template<typename T>
     void dealloc_array(T * array, size_t num)
     {
-        munmap(array, sizeof(T) * num);
+        /* munmap(array, sizeof(T) * num); */
+        numa_free(array,sizeof(T) * num);
     }
 
 
@@ -279,7 +281,8 @@ public:
     template<typename T>
     T * alloc_array(size_t num)
     {
-        T* array = (T*) mmap(NULL, sizeof(T) * num, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        /* T* array = (T*) mmap(NULL, sizeof(T) * num, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); */
+        T* array = (T*) numa_alloc_onnode(sizeof(T) * num,0); // allocate memory on Node0
         assert(array != nullptr);
         return array;
     }
