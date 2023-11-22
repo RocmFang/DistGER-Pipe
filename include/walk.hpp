@@ -698,7 +698,7 @@ public:
                     
                     Timer round_dump_timer;
                     /* this->dumpThread = new thread(&PathSet::dumpStorage,paths,local_output_path.c_str(),iter == 0 ? "w": "a"); */
-                    paths->dumpStorage(local_output_path.c_str(), iter == 0 ? "w": "a");
+                    /* paths->dumpStorage(local_output_path.c_str(), iter == 0 ? "w": "a"); */
                     this->wlog->info("Node {0} Round {1} dumpStorage Time {2:f}",get_mpi_rank(),iter,round_dump_timer.duration());
                     MPI_Allreduce(context_map_freq.data(),  this->vertex_freq, this->v_num, get_mpi_data_type<vertex_id_t>(), MPI_SUM, MPI_COMM_WORLD);
                     uint64_t words_sum = 0;

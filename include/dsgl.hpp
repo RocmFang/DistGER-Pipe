@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <memory>
 #include <numa.h>
+#include <queue>
+#include <string>
 #include <unistd.h>
 #include <omp.h>
 #include <mpi.h>
@@ -12,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
 #include <xmmintrin.h>
 #include "type.hpp"
 #include "util.hpp"
@@ -1618,6 +1621,32 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
     // ! 每次阶段训练结束调用一次
     graph->wlog->info("train ready");
     cout<<"train ready" << endl;
+
+    queue<shared_ptr<vector<int>>> dumpQueue;
+    mutex dq_lock;
+    string dumpDir = "./out/walk" + to_string(my_rank);
+    FILE* dumpFile = fopen(dumpDir.c_str(),"w");
+    bool flag = true;
+    auto consumeDumpTask = [&](){
+        while(flag || !dumpQueue.empty()){
+            if(dumpQueue.empty()){
+              usleep(1000);
+              continue;
+            }
+          dq_lock.lock();
+          shared_ptr<vector<int>> data = dumpQueue.front();
+          dumpQueue.pop();
+          dq_lock.unlock();
+          for(int i =0; i < data->size(); i++){
+            if((*data)[i] == -1){
+              fprintf(dumpFile,"\n");
+            }else {
+              fprintf(dumpFile," %d",(*data)[i]);
+            }
+          }
+        }
+    };
+    thread dumpThread(consumeDumpTask);
     while(graph->isWalking || !graph->data_queue.empty())
     {
         if(graph->data_queue.empty()){
@@ -1629,10 +1658,16 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
         shared_ptr<vector<int>> round_data = graph->data_queue.front();
         graph->data_queue.pop();
         graph->q_mutx.unlock();
+        dq_lock.lock();
+        dumpQueue.push(round_data);
+        dq_lock.unlock();
         MPI_Barrier(dsgl_comm);
         Train_SGNS_MPI(*round_data);
         /* graph->wlog->info("Node{1} Dequeue, size{0:d},train time: {2:f}",round_data->size(),my_rank,round_train_timer.duration()); */
     }
+    flag = false;
+    dumpThread.join();
+    fclose(dumpFile);
 
     printf("> [p%d Train SGNS MPI TIME:] %lf \n",my_rank, sgns_timer.duration());
     
