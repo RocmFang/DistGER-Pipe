@@ -1,11 +1,14 @@
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include <numa.h>
 #include <unistd.h>
 #include <omp.h>
 #include <mpi.h>
+#include <unordered_map>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +45,8 @@ WalkEngine<real_t, uint32_t> *graph;
 
 double top_speed = 0.0;
 
+unordered_map<string,size_t> numa_mem_size;
+
 struct vocab_word
 {
     uint cn;
@@ -58,13 +63,15 @@ public:
     sequence(int len)
     {
         length = len;
-        indices = (int *)_mm_malloc(length * sizeof(int), 64);
-        meta = (int *)_mm_malloc(length * sizeof(int), 64);
+        indices = (int *)numa_alloc_onnode(length * sizeof(int), 1);
+        meta = (int *)numa_alloc_onnode(length * sizeof(int), 1);
+        numa_mem_size["indices"] = length * sizeof(int);
+        numa_mem_size["meta"] = length * sizeof(int);
     }
     ~sequence()
     {
-        _mm_free(indices);
-        _mm_free(meta);
+        numa_free(indices,numa_mem_size["indices"]);
+        numa_free(meta,numa_mem_size["meta"]);
     }
 };
 
@@ -125,7 +132,8 @@ vector<int> word_freq_block_ind;
 
 void my_InitUnigramTable()
 {
-    table = (int *)_mm_malloc(table_size * sizeof(int), 64);
+    table = (int *)numa_alloc_onnode(table_size * sizeof(int), 1);
+    numa_mem_size["table"] = table_size * sizeof(int);
 
     const real power = 0.75f;
     double train_words_pow = 0.;
@@ -436,8 +444,11 @@ void ReadVocab()
 
 void InitNet()
 {
-    Wih = (real *)_mm_malloc(vocab_size * (hidden_size * sizeof(real)), 64);
-    Woh = (real *)_mm_malloc(vocab_size * (hidden_size * sizeof(real)), 64);
+    Wih = (real *)numa_alloc_onnode(vocab_size * (hidden_size * sizeof(real)), 1);
+    Woh = (real *)numa_alloc_onnode(vocab_size * (hidden_size * sizeof(real)), 1);
+    numa_mem_size["Wih"] = vocab_size * (hidden_size * sizeof(real));
+    numa_mem_size["Woh"] = vocab_size * (hidden_size * sizeof(real));
+
     if (!Wih || !Woh)
     {
         printf("Memory allocation failed\n");
@@ -643,8 +654,9 @@ void Train_SGNS_MPI(vector<int> &dataset)
                     //========== all sync =============
                     else{
 
-                        real *sync_block_in = (real *)_mm_malloc((size_t)vocab_size * hidden_size * sizeof(real), 64);
-                        real *sync_block_out = (real *)_mm_malloc((size_t)vocab_size * hidden_size * sizeof(real), 64);
+                        real *sync_block_in = (real *)numa_alloc_onnode((size_t)vocab_size * hidden_size * sizeof(real), 1);
+                        real *sync_block_out = (real *)numa_alloc_onnode((size_t)vocab_size * hidden_size * sizeof(real), 1);
+                        size_t sync_block_mem_size = (size_t)vocab_size * hidden_size * sizeof(real);
 
                         vector<int> sync_ind; //randomly generate the word in one context degree block
 
@@ -766,6 +778,8 @@ void Train_SGNS_MPI(vector<int> &dataset)
                             memcpy(Woh + (size_t)sync_ind[i] * hidden_size, sync_block_out + (i)*hidden_size, hidden_size * sizeof(real));
                         }
 
+                        numa_free(sync_block_in,sync_block_mem_size);
+                        numa_free(sync_block_out,sync_block_mem_size);
                     }
                     // let it go!
                     compute_go = true;
@@ -796,6 +810,7 @@ void Train_SGNS_MPI(vector<int> &dataset)
         {
 
 
+            unordered_map<string,std::size_t> thread_mem_size;
             Timer timer, wiat, woat, modet, wop;
 
             
@@ -843,26 +858,33 @@ void Train_SGNS_MPI(vector<int> &dataset)
 
             batch_size = 2 * window + 1;
             // temporary memory
-            real *inputM = (real *)_mm_malloc(2 * batch_size * hidden_size * sizeof(real), 64);
-            real *outputM = (real *)_mm_malloc((2 + negative) * hidden_size * sizeof(real), 64);
-            real *outputMd = (real *)_mm_malloc((2 + negative) * hidden_size * sizeof(real), 64);
-            real *corrM = (real *)_mm_malloc((2 + negative) * 2 * batch_size * sizeof(real), 64);
+            real *inputM = (real *)numa_alloc_onnode(2 * batch_size * hidden_size * sizeof(real), 1);
+            real *outputM = (real *)numa_alloc_onnode((2 + negative) * hidden_size * sizeof(real), 1);
+            real *outputMd = (real *)numa_alloc_onnode((2 + negative) * hidden_size * sizeof(real), 1);
+            real *corrM = (real *)numa_alloc_onnode((2 + negative) * 2 * batch_size * sizeof(real), 1);
+            thread_mem_size["inputM"] = 2 * batch_size * hidden_size * sizeof(real);
+            thread_mem_size["outputM"] = (2 + negative) * hidden_size * sizeof(real);
+            thread_mem_size["outputMd"] = (2 + negative) * hidden_size * sizeof(real);
+            thread_mem_size["corrM"] = (2 + negative) * 2 * batch_size * sizeof(real);
 
             // ========== first sentence input buffer and target buffer ====================
             int INPUT_BUFFER_MAX_SIZE = 22;
-            real *inputBuffer = (real *)_mm_malloc(INPUT_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 64);
+            real *inputBuffer = (real *)numa_alloc_onnode(INPUT_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 1);
+            thread_mem_size["inputBuffer"] =INPUT_BUFFER_MAX_SIZE * hidden_size * sizeof(real); 
             // real *targetBuffer = (real *)_mm_malloc(INPUT_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 64);
             vector<int> sen_words; // the variety nums of words in one sentence
 
             // ========== second sentence input buffer and target buffer =====================
             int INPUT_BUFFER2_MAX_SIZE = 22;
-            real *inputBuffer2 = (real *)_mm_malloc(INPUT_BUFFER2_MAX_SIZE * hidden_size * sizeof(real), 64);
+            real *inputBuffer2 = (real *)numa_alloc_onnode(INPUT_BUFFER2_MAX_SIZE * hidden_size * sizeof(real), 1);
+            thread_mem_size["inputBuffer2"] = INPUT_BUFFER2_MAX_SIZE * hidden_size * sizeof(real);
             // real *targetBuffer2 = (real *)_mm_malloc(INPUT_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 64);
             vector<int> sen_words2;
 
             // ========== common negative buffer =======================
             int NEGATIVE_BUFFER_MAX_SIZE = 100;
-            real *negativeBuffer = (real *)_mm_malloc(NEGATIVE_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 64);
+            real *negativeBuffer = (real *)numa_alloc_onnode(NEGATIVE_BUFFER_MAX_SIZE * hidden_size * sizeof(real), 1);
+            thread_mem_size["negativeBuffer"] = NEGATIVE_BUFFER_MAX_SIZE * hidden_size * sizeof(real);
             vector<int> neg_buffer;
             vector<int> neg_meta;
             vector<int> neg_words;
@@ -963,9 +985,10 @@ void Train_SGNS_MPI(vector<int> &dataset)
 
                     if (INPUT_BUFFER_MAX_SIZE < sen_words.size())
                     {
-                        _mm_free(inputBuffer);
+                        numa_free(inputBuffer,thread_mem_size["inputBuffer"]);
                         INPUT_BUFFER_MAX_SIZE = sen_words.size();
-                        inputBuffer = (real *)_mm_malloc(((size_t)INPUT_BUFFER_MAX_SIZE)*hidden_size * sizeof(real), 64);
+                        inputBuffer = (real *)numa_alloc_onnode(((size_t)INPUT_BUFFER_MAX_SIZE)*hidden_size * sizeof(real), 1);
+                        thread_mem_size["inputBuffer"] = ((size_t)INPUT_BUFFER_MAX_SIZE)*hidden_size * sizeof(real);
                     }
 
                     for (size_t i = 0; i < sen_words.size(); i++)
@@ -1028,9 +1051,10 @@ void Train_SGNS_MPI(vector<int> &dataset)
 
                     if (INPUT_BUFFER2_MAX_SIZE < sen_words2.size())
                     {
-                        _mm_free(inputBuffer2);
+                        numa_free(inputBuffer2,thread_mem_size["inputBuffer2"]);
                         INPUT_BUFFER2_MAX_SIZE = sen_words2.size();
-                        inputBuffer2 = (real *)_mm_malloc(((size_t)INPUT_BUFFER2_MAX_SIZE)*hidden_size * sizeof(real), 64);
+                        inputBuffer2 = (real *)numa_alloc_onnode(((size_t)INPUT_BUFFER2_MAX_SIZE)*hidden_size * sizeof(real), 1);
+                        thread_mem_size["inputBuffer2"] = ((size_t)INPUT_BUFFER2_MAX_SIZE)*hidden_size * sizeof(real);
                     }
 
                     for (size_t i = 0; i < sen_words2.size(); i++)
@@ -1085,9 +1109,10 @@ void Train_SGNS_MPI(vector<int> &dataset)
                     }
                     if (NEGATIVE_BUFFER_MAX_SIZE < neg_buffer.size())
                     {
-                        _mm_free(negativeBuffer);
+                        numa_free(negativeBuffer,thread_mem_size["negativeBuffer"]);
                         NEGATIVE_BUFFER_MAX_SIZE = neg_buffer.size();
-                        negativeBuffer = (real *)_mm_malloc(((size_t)NEGATIVE_BUFFER_MAX_SIZE)*hidden_size * sizeof(real), 64);
+                        negativeBuffer = (real *)numa_alloc_onnode(((size_t)NEGATIVE_BUFFER_MAX_SIZE)*hidden_size * sizeof(real), 1);
+                        thread_mem_size["negativeBuffer"] = ((size_t)NEGATIVE_BUFFER_MAX_SIZE)*hidden_size * sizeof(real);
                     }
 
                     for (size_t i = 0; i < neg_buffer.size(); i++)
@@ -1418,13 +1443,13 @@ void Train_SGNS_MPI(vector<int> &dataset)
                     train_sen_num = 0;
                 }
             }
-            _mm_free(inputM);
-            _mm_free(outputM);
-            _mm_free(outputMd);
-            _mm_free(corrM);
-            _mm_free(inputBuffer);
-            _mm_free(inputBuffer2);
-            _mm_free(negativeBuffer);
+            numa_free(inputM,thread_mem_size["inputM"]);
+            numa_free(outputM,thread_mem_size["outputM"]);
+            numa_free(outputMd,thread_mem_size["outputMd"]);
+            numa_free(corrM,thread_mem_size["corrM"]);
+            numa_free(inputBuffer,thread_mem_size["inputBuffer"]);
+            numa_free(inputBuffer2,thread_mem_size["inputBuffer2"]);
+            numa_free(negativeBuffer,thread_mem_size["negativeBuffer"]);
             if (disk)
             {
                 fclose(fin);
@@ -1570,9 +1595,10 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
         printf("MPI message chunk size (MB): %d\n", message_size);
         printf("starting training using file: %s\n\n", train_file);
     }
-    vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word));
-    vocab_hash = (int *)_mm_malloc(vocab_hash_size * sizeof(int), 64);
-    expTable = (real *)_mm_malloc((EXP_TABLE_SIZE + 1) * sizeof(real), 64);
+    vocab = (struct vocab_word *)calloc(vocab_max_size, sizeof(struct vocab_word)); // used in old vocab
+    vocab_hash = (int *)_mm_malloc(vocab_hash_size * sizeof(int), 64); // used in old vocab
+    expTable = (real *)numa_alloc_onnode((EXP_TABLE_SIZE + 1) * sizeof(real), 1);
+    numa_mem_size["expTable"] = (EXP_TABLE_SIZE + 1) * sizeof(real);
     for (i = 0; i < EXP_TABLE_SIZE + 1; i++)
     {
         expTable[i] = exp((i / (real)EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
@@ -1618,6 +1644,10 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
         printf("> [%d Save TIME:] %lf \n", my_rank,saveModel_timer.duration());
 
     }
+    numa_free(Wih,numa_mem_size["Wih"]);
+    numa_free(Woh,numa_mem_size["Woh"]);
+    numa_free(table,numa_mem_size["table"]);
+    numa_free(expTable,numa_mem_size["expTable"]);
     MPI_Comm_free(&dsgl_comm);
     // fclose(flog);
     printf("[ %d ] dsgl is over\n",my_rank);
