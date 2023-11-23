@@ -8,7 +8,7 @@ set(CMAKE_BUILD_TYPE "Release")
 set(DGER_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 option(WITH_TESTS "Build unit test programs" OFF)
 # 设置导出 compile_commands.json
-set(CMAKE_EXPORT_COMPILECOMMANDS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 # 设置 Debug 模式下的编译选项
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
