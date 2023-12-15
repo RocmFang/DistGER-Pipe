@@ -4,6 +4,7 @@
 #include <utility>
 #include <type_traits>
 #include <algorithm>
+#include <typeinfo>
 
 #include "storage.hpp"
 #include "type.hpp"
@@ -18,12 +19,15 @@ class RelabelOptionHelper : public OptionHelper
 private:
     args::ValueFlag<std::string> input_path_flag;
     args::ValueFlag<std::string> output_path_flag;
+    args::ValueFlag<std::string> static_comp_flag;
 public:
     std::string input_path;
     std::string output_path;
+    std::string static_comp;
     RelabelOptionHelper() :
         input_path_flag(parser, "input", "input graph path", {'i'}),
-        output_path_flag(parser, "output", "output graph path", {'o'})
+        output_path_flag(parser, "output", "output graph path", {'o'}),
+        static_comp_flag(parser, "static_comp", "[weighted | unweighted] a weighted graph usually indicates a non-trivial static component.", {'s'})
     {
     }
 
@@ -37,6 +41,9 @@ public:
 
         assert(output_path_flag);
         output_path = args::get(output_path_flag);
+
+        assert(static_comp.compare("weighted") == 0 || static_comp.compare("unweighted") == 0);
+        static_comp = args::get(static_comp_flag);
 
     }
 };
@@ -146,8 +153,11 @@ void grelabel(const char* input_path, const char* output_path)
         vertex_id_t src = edges[e_i].src;
         vertex_id_t dst = edges[e_i].dst;
 
-        fprintf(output_file,"%u %u %u\n",relabel[src],relabel[dst],edges[e_i].data);
-        // fprintf(output_file,"%u\t%u\n",relabel[src],relabel[dst]);
+        const type_info& typeInfo = typeid(edge_data_t);
+        if(typeInfo == typeid(EmptyData)) 
+            fprintf(output_file,"%u\t%u\n",relabel[src],relabel[dst]);
+        else
+          fprintf(output_file,"%u %u %u\n",relabel[src],relabel[dst],edges[e_i].data);
      }
     
     fclose(output_file);
@@ -160,9 +170,15 @@ int main(int argc, char** argv)
     Timer timer;
     RelabelOptionHelper opt;
     opt.parse(argc, argv);
-
-    grelabel<vertex_id_t>(opt.input_path.c_str(), opt.output_path.c_str());
-
+    if(opt.static_comp.compare("weighted")==0)
+      grelabel<real_t>(opt.input_path.c_str(), opt.output_path.c_str());
+    else if(opt.static_comp.compare("unweighted")==0)
+      grelabel<EmptyData>(opt.input_path.c_str(), opt.output_path.c_str());
+    else 
+    { 
+      printf("Please specific weighted or unweighted\n"); 
+      return 0;
+    }
     printf("[relabel] time: %f \n",timer.duration());
 	return 0;
 }
