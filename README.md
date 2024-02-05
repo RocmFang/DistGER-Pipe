@@ -1,25 +1,21 @@
-
-## This codebase gives the reference implementation of [DistGER](https://www.vldb.org/pvldb/vol16/p1643-fang.pdf) as described in the paper:
-Distributed Graph Embedding with Information-Oriented Random Walks. <br>
-Peng Fang, Arijit Khan, Siqiang Luo, Fang Wang, Dan Feng, Zhenli Li, Wei Yin and Yuchao Cao <br>
-Published to [49th International Conference on Very Large Data Bases (VLDB 2023)](https://vldb.org/2023/) <br>
-
-
+# DistGER-Pipe
+Pipelined Execution for DistGER
+<meta name="robots" content="noindex">
 
 # Prerequisites
 
 - Ubuntu 16.04
 - Linux kernel 4.15.0
 - g++ 9.4.0
-- CMake 3.10.2
-- [MPICH 3.4.2](https://www.mpich.org)
+- cmake 3.10.2
+- [MPICH 3.4.2](https://www.mpich.org/)
 - [MKL 2022.0.2](https://software.intel.com/en-us/mkl)
 
 # Datasets
 
 The evaluated dataset Youtube and LiveJournal are prepraed in the "dataset" directory.
 
-Since the the space limited of the repository, the other datasets [Twitter](https://law.di.unimi.it/datasets.php), [Com-Orkut](https://snap.stanford.edu/) and [Flickr](http://datasets.syr.edu/pages/datasets.html) can be found in their open resource.
+Since the the space limited of the repository, the other dataset [Twitter](https://law.di.unimi.it/datasets.php), [Com-Orkut](https://snap.stanford.edu/), [Flickr](http://datasets.syr.edu/pages/datasets.html) and [UK-2007](https://law.di.unimi.it/datasets.php) can be found in their open resources.
 
 # Setup
 
@@ -82,18 +78,3 @@ mpiexec -hostfile ./hosts -n 8 ./bin/huge_walk -g ../dataset/LJ-8.data-r -p ../d
 ```
 
 ### Check the output files in "out" directory
-
-
-# Citing
-If you find *DistGER* useful for your research, please consider citing the following paper:
-```
-@article{fang2023distributed,
-  title={Distributed Graph Embedding with Information-Oriented Random Walks},
-  author={Fang, Peng and Khan, Arijit and Luo, Siqiang and Wang, Fang and Feng, Dan and Li, Zhenli and Yin, Wei and Cao, Yuchao},
-  journal = {Proc. VLDB Endow.},
-  year = {2023},
-  volume = {16},
-  number = {7},
-  pages = {1643–1656}
-}
-```
