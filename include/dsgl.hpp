@@ -142,14 +142,14 @@ void my_InitUnigramTable()
     double train_words_pow = 0.;
 #pragma omp parallel for num_threads(num_threads) reduction(+ \
                                                             : train_words_pow)
-    for (int i = 0; i < vocab_size; i++)
+    for (ulonglong i = 0; i < vocab_size; i++)
     {
         train_words_pow += pow(v_vocab[i].cn, power);
     }
 
-    int i = 0;
+    ulonglong i = 0;
     real d1 = pow(v_vocab[i].cn, power) / train_words_pow;
-    for (int a = 0; a < table_size; a++)
+    for (ulonglong a = 0; a < table_size; a++)
     {
         table[a] = i; 
         if (a / (real)table_size > d1)
@@ -459,7 +459,7 @@ void InitNet()
     }
 
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
-    for (int i = 0; i < vocab_size; i++)
+    for (ulonglong i = 0; i < vocab_size; i++)
     {
         memset(Wih + i * hidden_size, 0.f, hidden_size * sizeof(real));
         memset(Woh + i * hidden_size, 0.f, hidden_size * sizeof(real));
@@ -467,7 +467,8 @@ void InitNet()
 
     // initialization
     ulonglong next_random = 1;
-    for (int i = 0; i < vocab_size * hidden_size; i++)
+#pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+    for (ulonglong i = 0; i < vocab_size * hidden_size; i++)
     {
         next_random = next_random * (ulonglong)25214903917 + 11;
         Wih[i] = (((next_random & 0xFFFF) / 65536.f) - 0.5f) / hidden_size;
@@ -555,6 +556,7 @@ void Train_SGNS_MPI(vector<int> &dataset)
     bool compute_go = true;
 
     
+  printf("[%d] train is ready\n",my_rank);
 
 #pragma omp parallel num_threads(num_threads)
     {
@@ -1611,7 +1613,7 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
 
     Timer pw_timer;
     preparatory_work();
-    // printf("\n> [preparatory_work TIME:] %lf \n", pw_timer.duration());
+    printf("\n> [preparatory_work TIME:] %lf \n", pw_timer.duration());
 
 
     // word_freq_block();
@@ -1620,11 +1622,11 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
 
     // ! 每次阶段训练结束调用一次
     graph->wlog->info("train ready");
-    cout<<"train ready" << endl;
+    cout<<my_rank<<" train ready" << endl;
 
     queue<shared_ptr<vector<int>>> dumpQueue;
     mutex dq_lock;
-    string dumpDir = "./out/walk" + to_string(my_rank);
+    string dumpDir = "/home/lzl/dumptmp/walk.txt" + to_string(my_rank);
     FILE* dumpFile = fopen(dumpDir.c_str(),"w");
     bool flag = true;
     auto consumeDumpTask = [&](){
@@ -1637,7 +1639,7 @@ void dsgl(int argc, char **argv, vector<int> *vertex_cn, WalkEngine<real_t, uint
           shared_ptr<vector<int>> data = dumpQueue.front();
           dumpQueue.pop();
           dq_lock.unlock();
-          for(int i =0; i < data->size(); i++){
+          for(ulonglong i =0; i < data->size(); i++){
             if((*data)[i] == -1){
               fprintf(dumpFile,"\n");
             }else {
