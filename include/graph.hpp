@@ -18,6 +18,7 @@
 // #include <boost/functional/hash.hpp>
 
 #include <omp.h>
+#include <numa.h>
 
 #include "type.hpp"
 #include "util.hpp"
@@ -266,7 +267,8 @@ public:
     template<typename T>
     void dealloc_array(T * array, size_t num)
     {
-        munmap(array, sizeof(T) * num);
+        /* munmap(array, sizeof(T) * num); */
+        numa_free(array,sizeof(T) * num);
     }
 
 
@@ -279,7 +281,8 @@ public:
     template<typename T>
     T * alloc_array(size_t num)
     {
-        T* array = (T*) mmap(NULL, sizeof(T) * num, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        /* T* array = (T*) mmap(NULL, sizeof(T) * num, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0); */
+        T* array = (T*) numa_alloc_onnode(sizeof(T) * num,0); // allocate memory on Node0
         assert(array != nullptr);
         return array;
     }
@@ -1143,9 +1146,26 @@ public:
                 MPI_Request* req = new MPI_Request();
                 requests.push_back(req);
                 // std::cout << "diff * sizeof(msg_t) = " << diff << " " << sizeof(msg_t) << std::endl;
-                assert(diff * sizeof(msg_t) < INT_MAX);
-        
-                MPI_Isend(((msg_t*)msg_send_buffer[dst]->data) + send_progress[dst], diff * sizeof(msg_t), get_mpi_data_type<char>(), dst, Tag_Msg, MPI_COMM_WORLD, req);
+                unsigned long long msg_size = (unsigned long long)diff * sizeof(msg_t);
+                if (msg_size > INT_MAX)
+                {
+                    // printf("溢出了\n");
+                    unsigned long long package_size = 1024 * 1024 * 100;
+                    int round = msg_size / package_size + ((msg_size % package_size) > 0 ? 1 : 0);
+                    for (int r = 0; r < round; r++)
+                    {
+                        unsigned long long start = r * package_size;
+                        int send_size = min(package_size, (msg_size - start));
+                        assert(send_size < INT_MAX);
+                        // printf("send_size: %d\n",send_size);
+                        MPI_Isend(((msg_t *)msg_send_buffer[dst]->data) + send_progress[dst] + start, send_size, get_mpi_data_type<char>(), dst, Tag_Msg, MPI_COMM_WORLD, req);
+                    }
+                }
+                else
+                {
+                    assert(diff * sizeof(msg_t) < INT_MAX);
+                    MPI_Isend(((msg_t *)msg_send_buffer[dst]->data) + send_progress[dst], diff * sizeof(msg_t), get_mpi_data_type<char>(), dst, Tag_Msg, MPI_COMM_WORLD, req);
+                }
 #ifdef PERF_PROF
                 if (local_partition_id == 0)
                 {

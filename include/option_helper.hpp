@@ -100,6 +100,7 @@ private:
     args::ValueFlag<vertex_id_t> min_length_flag;
     args::ValueFlag<vertex_id_t> init_round_flag;
     args::Flag make_undirected_flag;
+    args::ValueFlag<int> worker_num_flag;
 
 public:
     vertex_id_t v_num;
@@ -108,13 +109,14 @@ public:
     bool make_undirected;
     vertex_id_t min_length;
     vertex_id_t init_round;
+    int worker_num; 
     GraphOptionHelper():
         v_num_flag(parser, "vertex", "vertex number", {'v'}),
         graph_path_flag(parser, "graph", "graph data path", {'g'}),
         partition_path_flag(parser,"partition","graph vertices partition path",{'p'}),
         min_length_flag(parser, "min_length","min length per walker",{"min_L"}),
         init_round_flag(parser, "init_round", "init round to begin", {"min_R"}),
-
+        worker_num_flag(parser,"worker_num","threads num of random walk",{'k'}),
         make_undirected_flag(parser, "make-undirected", "load graph and treat each edge as undirected edge", {"make-undirected"})
     {}
     virtual void parse(int argc, char **argv)
@@ -136,6 +138,8 @@ public:
         partition_path = args::get(partition_path_flag);
 
         make_undirected = make_undirected_flag;
+
+        worker_num = args::get(worker_num_flag);
     }
 };
 

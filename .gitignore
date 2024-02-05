@@ -1,6 +1,8 @@
 /dataset
 /build
+/ext
 .vscode
+.cache
 DistGER_Full_Version.pdf
 
 

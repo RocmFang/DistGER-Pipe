@@ -10,6 +10,11 @@
 #include <unordered_map>
 #include <algorithm>
 #include <queue>
+#include "spdlog/async.h"
+#include "spdlog/sinks/basic_file_sink.h"
+#include <memory>
+#include <sched.h>
+#include <thread>
 
 using namespace std; 
 
@@ -399,6 +404,14 @@ public:
     vector<vertex_id_t> new_sort; 
     vertex_id_t minLength = 20;
     vertex_id_t init_round = 5;
+    queue<shared_ptr<vector<int>>> data_queue;
+    mutex q_mutx;
+    double idle_time = 0.0;
+    shared_ptr<spdlog::logger> wlog;
+    Timer idle_timer;
+    volatile bool isWalking;
+    mutex mpi_allR_lock;
+    thread* dumpThread = nullptr;
     
     void get_new_sort()
     {
@@ -451,6 +464,11 @@ public:
     {
         // timer = new Timer();
         randgen = new StdRandNumGenerator[this->worker_num];
+
+        string process_file_log = string("logs/") + string( "p" ) + to_string(get_mpi_rank())+"_alog.txt";
+        this->wlog = spdlog::basic_logger_mt<spdlog::async_factory>("async_file_logger", process_file_log,true);
+        wlog->flush_on(spdlog::level::trace);
+        this->isWalking = true;
     }
 
     ~WalkEngine()
@@ -460,17 +478,10 @@ public:
         {
             delete []randgen;
         }
-        size_t glb_cross;
-        MPI_Allreduce(&this->cross_num, &glb_cross, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_intr;
-        MPI_Allreduce(&this->intr_num, &glb_intr, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_trace;
-        MPI_Allreduce(&this->trace_num, &glb_trace, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        size_t glb_p_step;
-        MPI_Allreduce(&this->p_step, &glb_p_step, 1, get_mpi_data_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
-        // printf("[p%u]【sum_p_step】 %zu 【sum cross】 %zu 【sum intr】 %zu 【sum_trace】 %zu cross_num %zu intr_num %zu  trace_num %zu p_step_num %zu\n",this->local_partition_id, glb_p_step, glb_cross, glb_intr, glb_trace, cross_num, intr_num, trace_num, p_step);
-
-       
+        if(this->dumpThread != nullptr) 
+        {
+            delete this->dumpThread;
+        }
     }
 
     void set_concurrency(int worker_num_param)
@@ -662,7 +673,9 @@ public:
                     walk_data.pc->add_footprint(Footprint(walk_data.local_walkers[w_i].data.id, walk_data.local_walkers[w_i].dst_vertex_id, 0), omp_get_thread_num());
                 }
             }
+            Timer round_walk_timer;
             internal_walk_epoch(&walk_data, walker_config, transition_config);
+            this->idle_timer.restart();
 
             if (walk_data.collect_path_flag)
             {
@@ -675,9 +688,18 @@ public:
                     // std::string local_output_path = walk_config->output_path_prefix + "." + std::to_string(this->local_partition_id);
                     std::string local_output_path = walk_config->output_path_prefix;
                     Timer timer_dump;
-                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,this->local_corpus,this->vertex_cn,this->co_occor);
+                    shared_ptr<vector<int>> data_ptr = make_shared<vector<int>>();
+                    paths->dump(local_output_path.c_str(), iter == 0 ? "w": "a", walk_config->print_with_head_info, context_map_freq,*data_ptr,this->vertex_cn,this->co_occor);
+                    this->q_mutx.lock();
+                    this->data_queue.push(data_ptr);
+                    this->wlog->info("Node {1} Enqueue Round {2}, DataSize {0:d} walk Time:{3:f}",data_ptr->size(),get_mpi_rank(),iter,round_walk_timer.duration());
+                    this->q_mutx.unlock();
                     this->other_time += timer_dump.duration();
                     
+                    Timer round_dump_timer;
+                    /* this->dumpThread = new thread(&PathSet::dumpStorage,paths,local_output_path.c_str(),iter == 0 ? "w": "a"); */
+                    /* paths->dumpStorage(local_output_path.c_str(), iter == 0 ? "w": "a"); */
+                    this->wlog->info("Node {0} Round {1} dumpStorage Time {2:f}",get_mpi_rank(),iter,round_dump_timer.duration());
                     MPI_Allreduce(context_map_freq.data(),  this->vertex_freq, this->v_num, get_mpi_data_type<vertex_id_t>(), MPI_SUM, MPI_COMM_WORLD);
                     uint64_t words_sum = 0;
                     uint64_t degree_sum = 0;
@@ -754,6 +776,7 @@ public:
                 }
                 delete walk_data.pc;
             }
+            this->idle_time += this->idle_timer.duration();
         }
 
         this->dealloc_array(walk_data.local_walkers, walker_array_size);
@@ -772,6 +795,8 @@ public:
         TransitionConfig<edge_data_t, walker_data_t> *transition_config
     )
     {
+        cpu_set_t set;
+        CPU_ZERO(&set);
         typedef Walker<walker_data_t> walker_t;
         typedef Message<walker_t> walker_msg_t;
 
@@ -813,6 +838,13 @@ public:
                 #pragma omp parallel if (use_parallel)
                 {
                     int worker_id = omp_get_thread_num();
+                    int cpuid = worker_id % 26 + ((worker_id / 26)%2 == 0 ? 0 : 52);
+                    CPU_SET(cpuid,&set);
+                    if(sched_setaffinity(0,sizeof(set),&set) == -1)
+                    {
+                        printf("%s:%d sched_setaffinity fail\n",__FILE__,__LINE__);
+                        exit(-2);
+                    }
                     StdRandNumGenerator* gen = get_thread_local_rand_gen();
                     vertex_id_t next_workload;
                     while((next_workload =  __sync_fetch_and_add(&progress, work_step_length)) < data_amount)
